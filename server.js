@@ -1,9 +1,15 @@
 const express = require('express');
+const dotenv = require('dotenv');
+const connectDB = require('./config/db');
 const articleRoutes = require('./routes/articleRoutes');
 const userRoutes = require('./routes/userRoutes');
 
+dotenv.config () ;
+
 const app = express();
-const PORT = 3001;
+
+const PORT = process.env.PORT || 3001;
+
 
 // Middleware global
 app.use(express.json()); // indispensable pour lire le corps JSON (req.body)
@@ -27,8 +33,26 @@ app.get('/about', (req, res) => {
     });
 });
 
+//
 
-// 4. dé marrer le serveur : il attend les requêtes sur le port 3000
-app.listen (PORT , () => {
-console . log(`Serveur disponible sur http :// localhost :${ PORT }`) ;
-}) ;
+ // Connexion à MongoDB Atlas puis démarrage du serveur
+(async () => {
+    try {
+        // 1. Établir la connexion à MongoDB
+        await connectDB(process.env.MONGODB_URI);
+
+        // 2. Démarrer le serveur HTTP
+        app.listen(PORT, () => {
+            console.log(`Serveur MERN en écoute sur http://localhost:${PORT}`);
+        });
+
+    } catch (err) {
+        console.error(
+            'Erreur critique au démarrage du serveur :',
+            err.message
+        );
+
+        process.exit(1);
+    }
+})();
+
