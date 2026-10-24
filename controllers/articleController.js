@@ -1,28 +1,25 @@
 
 const Article = require('../models/articleModel');
-const User = require('../models/userModel');
 
 // 1. Récupérer tous les articles avec les informations de l'auteur
-// GET /api/articles?author=...
 const getAllArticles = async (req, res) => {
     try {
         const { author } = req.query;
-
         let filtre = {};
 
-        // Filtrer par nom de l'auteur
         if (author) {
+            const User = require('../models/userModel');
+
             const users = await User.find({
                 name: author
             }).select('_id');
 
             const authorIds = users.map(user => user._id);
-
             filtre.author = { $in: authorIds };
         }
 
         const articles = await Article.find(filtre)
-            .populate('author', 'name email');
+            .populate('author', 'name email role');
 
         res.status(200).json({
             total: articles.length,
@@ -30,14 +27,11 @@ const getAllArticles = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({
-            message: err.message
-        });
+        res.status(500).json({ message: err.message });
     }
 };
 
 // 2. Récupérer un article par son ID
-// GET /api/articles/:id
 const getArticleById = async (req, res) => {
     try {
         const article = await Article.findById(req.params.id)
@@ -52,139 +46,147 @@ const getArticleById = async (req, res) => {
         res.status(200).json(article);
 
     } catch (err) {
-    if (err.name === 'CastError') {
-        return res.status(400).json({
-            message: 'Identifiant de ressource invalide (format ObjectId attendu)'
-        });
-    }
+        if (err.name === 'CastError') {
+            return res.status(400).json({
+                message: 'Identifiant de ressource invalide (format ObjectId attendu)'
+            });
+        }
 
-    res.status(500).json({
-        message: err.message
-    });
-}
+        res.status(500).json({ message: err.message });
+    }
 };
 
-// 3. Créer un nouvel article lié à un auteur
-// POST /api/articles
+// 3. Créer un article (route protégée par JWT)
 const createArticle = async (req, res) => {
     try {
-        const { title, content, authorId } = req.body;
+        const { title, content } = req.body;
 
-        if (!title || !content || !authorId) {
+        if (!title || !content) {
             return res.status(400).json({
-                message: 'title, content et authorId sont obligatoires'
+                message: 'Titre et contenu obligatoires'
             });
         }
 
-        // Vérifier que l'auteur existe dans MongoDB
-        const author = await User.findById(authorId);
-
-        if (!author) {
-            return res.status(404).json({
-                message: 'Auteur introuvable'
-            });
-        }
-
-        // Créer l'article dans MongoDB
+        // L'auteur vient du token JWT vérifié
         const newArticle = await Article.create({
             title,
             content,
-            author: authorId
+            author: req.user._id
         });
 
-        // Retourner les informations de l'auteur
-        const populatedArticle = await newArticle.populate(
+        const populated = await newArticle.populate(
             'author',
-            'name email'
+            'name email role'
         );
 
-        res.status(201).json(populatedArticle);
+        res.status(201).json(populated);
 
     } catch (err) {
-        res.status(400).json({
-            message: err.message
-        });
+        res.status(500).json({ message: err.message });
     }
 };
 
-// 4. Mettre à jour un article
-// PUT /api/articles/:id
+// 4. Modifier un article : auteur ou administrateur
 const updateArticle = async (req, res) => {
     try {
-        const { title, content, authorId } = req.body;
-
-        const modifications = {};
-
-        if (title !== undefined) {
-            modifications.title = title;
-        }
-
-        if (content !== undefined) {
-            modifications.content = content;
-        }
-
-        // Vérifier le nouvel auteur si authorId est fourni
-        if (authorId !== undefined) {
-            const author = await User.findById(authorId);
-
-            if (!author) {
-                return res.status(404).json({
-                    message: 'Auteur introuvable'
-                });
-            }
-
-            modifications.author = authorId;
-        }
-
-        const article = await Article.findByIdAndUpdate(
-            req.params.id,
-            modifications,
-            {
-                new: true,
-                runValidators: true
-            }
-        ).populate('author', 'name email');
+        const article = await Article.findById(req.params.id);
 
         if (!article) {
             return res.status(404).json({
-                message: 'Article introuvable pour la mise à jour'
+                message: 'Article non trouvé'
             });
         }
 
-        res.status(200).json({
-            message: 'Article mis à jour avec succès',
-            article
-        });
+        // Vérification des droits de propriété
+        if (
+            article.author.toString() !== req.user._id.toString() &&
+            req.user.role !== 'admin'
+        ) {
+            return res.status(403).json({
+                message: "Action interdite : vous n'êtes pas l'auteur de cet article"
+            });
+        }
+
+        if (req.body.title !== undefined) {
+            article.title = req.body.title;
+        }
+
+        if (req.body.content !== undefined) {
+            article.content = req.body.content;
+        }
+
+        const updated = await article.save();
+
+        const populated = await updated.populate(
+            'author',
+            'name email role'
+        );
+
+        res.status(200).json(populated);
 
     } catch (err) {
-        res.status(400).json({
-            message: err.message
-        });
+        if (err.name === 'CastError') {
+            return res.status(400).json({
+                message: 'Identifiant invalide'
+            });
+        }
+
+        res.status(500).json({ message: err.message });
     }
 };
 
-// 5. Supprimer un article
-// DELETE /api/articles/:id
+// 5. Supprimer un article : auteur ou administrateur
 const deleteArticle = async (req, res) => {
     try {
-        const article = await Article.findByIdAndDelete(
-            req.params.id
-        );
+        const article = await Article.findById(req.params.id);
 
         if (!article) {
             return res.status(404).json({
-                message: 'Article introuvable'
+                message: 'Article non trouvé'
             });
         }
+
+        // Vérification des droits de propriété
+        if (
+            article.author.toString() !== req.user._id.toString() &&
+            req.user.role !== 'admin'
+        ) {
+            return res.status(403).json({
+                message: "Action interdite : vous n'êtes pas l'auteur de cet article"
+            });
+        }
+
+        await Article.findByIdAndDelete(req.params.id);
 
         res.status(200).json({
             message: 'Article supprimé avec succès',
-            article
+            id: req.params.id
         });
 
     } catch (err) {
-        res.status(400).json({
-            message: 'Identifiant article invalide'
+        if (err.name === 'CastError') {
+            return res.status(400).json({
+                message: 'Identifiant invalide'
+            });
+        }
+
+        res.status(500).json({ message: err.message });
+    }
+};
+// GET /api/articles/my-articles
+const getMyArticles = async (req, res) => {
+    try {
+        const articles = await Article.find({
+            author: req.user._id
+        });
+
+        res.status(200).json({
+            total: articles.length,
+            articles
+        });
+    } catch (err) {
+        res.status(500).json({
+            message: err.message
         });
     }
 };
@@ -195,5 +197,6 @@ module.exports = {
     getArticleById,
     createArticle,
     updateArticle,
-    deleteArticle
+    deleteArticle,
+    getMyArticles
 };

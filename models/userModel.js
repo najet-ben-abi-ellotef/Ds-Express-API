@@ -51,7 +51,16 @@ const userSchema = new mongoose.Schema(
                 /^\d{8}$/,
                 'Numéro de 8 chiffres requis'
             ]
-        }
+        },
+        password: {
+    type: String,
+    required: [true, 'Le mot de passe est obligatoire'],
+    minlength: [
+        6,
+        'Le mot de passe doit comporter au moins 6 caractères'
+    ]
+},
+
     },
     
     
